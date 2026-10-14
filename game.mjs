@@ -1,0 +1,32 @@
+import {KEYS,CHARGE_MS,availableTypes,makeShot,stepShot,resolveHit} from './engine.mjs';
+const canvas=document.querySelector('#arena'),ctx=canvas.getContext('2d'),W=960,H=600;
+const colors={M:'#e594fa',E:'#6ce5d5',C:'#6ebdff',A:'#ffc36d'};
+let state='ready',score=0,life=5,targets=[],shots=[],particles=[],pressed=new Map(),arrows=new Set(),aim={x:480,y:160},clock=0,spawn=0,last=performance.now(),flash=0;
+const $=s=>document.querySelector(s);
+function hud(){ $('#score').textContent=score;$('#life').textContent='♥ '.repeat(life).trim()||'0';$('#phase').textContent=score<8?'E TRAINING':'MECA MIX'; }
+function clearKeys(){pressed.clear();arrows.clear();}
+function overlay(title,text,button){$('#overlayTitle').textContent=title;$('#overlayText').innerHTML=text;$('#start').textContent=button;$('#overlay').classList.remove('hidden');}
+function begin(){score=0;life=5;targets=[];shots=[];particles=[];clock=0;spawn=.7;clearKeys();state='playing';$('#overlay').classList.add('hidden');$('#pause').textContent='一時停止';$('#message').textContent='最初は S → E。8個撃破で全弾種が解放。';hud();canvas.focus();}
+function pause(){if(state==='playing'){state='paused';clearKeys();overlay('一時停止','準備ができたら、続きを始めよう。','再開');$('#pause').textContent='再開';}else if(state==='paused'){state='playing';last=performance.now();$('#overlay').classList.add('hidden');$('#pause').textContent='一時停止';canvas.focus();}}
+$('#start').onclick=()=>state==='paused'?pause():begin();$('#restart').onclick=begin;$('#pause').onclick=pause;
+canvas.addEventListener('pointermove',e=>{const r=canvas.getBoundingClientRect();aim.x=(e.clientX-r.left)/r.width*W;aim.y=(e.clientY-r.top)/r.height*H;});
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(KEYS[k]||e.key.startsWith('Arrow')||e.key===' '){e.preventDefault();}if(state!=='playing')return;if(e.repeat)return;if(KEYS[k])pressed.set(k,performance.now());if(e.key.startsWith('Arrow'))arrows.add(e.key);if(e.key===' ')pause();});
+window.addEventListener('keyup',e=>{const k=e.key.toLowerCase();arrows.delete(e.key);if(state!=='playing'){pressed.delete(k);return;}if(KEYS[k]&&pressed.has(k)){const held=performance.now()-pressed.get(k);pressed.delete(k);const offset=Object.keys(KEYS).indexOf(k)*20-30;shots.push(makeShot(KEYS[k],held,480+offset,560,aim.x,Math.min(aim.y,520)));}});
+window.addEventListener('blur',()=>{if(state==='playing')pause();});document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='playing')pause();});
+function burst(x,y,color){for(let i=0;i<15;i++){let a=Math.random()*Math.PI*2;particles.push({x,y,vx:Math.cos(a)*(50+Math.random()*130),vy:Math.sin(a)*(50+Math.random()*130),ttl:.55,color});}}
+function update(dt){clock+=dt;spawn-=dt;flash=Math.max(0,flash-dt);if(arrows.has('ArrowLeft'))aim.x-=350*dt;if(arrows.has('ArrowRight'))aim.x+=350*dt;if(arrows.has('ArrowUp'))aim.y-=350*dt;if(arrows.has('ArrowDown'))aim.y+=350*dt;aim.x=Math.max(10,Math.min(W-10,aim.x));aim.y=Math.max(10,Math.min(520,aim.y));
+ if(spawn<=0){let types=availableTypes(score);let type=types[Math.floor(Math.random()*types.length)];targets.push({type,x:70+Math.random()*820,y:-30,r:25,vx:(Math.random()-.5)*110,vy:score<8?25:Math.min(62,30+score*.4),angle:Math.random()*6});spawn=score<8?1.8:Math.max(.65,1.5-score*.012);}
+ for(let t of targets){t.x+=t.vx*dt;t.y+=t.vy*dt;t.angle+=dt;if(t.x<30||t.x>W-30){t.x=Math.max(30,Math.min(W-30,t.x));t.vx*=-1;}if(t.y>535&&!t.dead){t.dead=true;life--;flash=.25;burst(t.x,535,'#ff6578');hud();if(life<=0){state='over';clearKeys();overlay('ミッション終了',`撃破数 <b>${score}</b>。<br>反射弾と文字の切り替えで、さらに上を目指そう。`,'もう一度');}}}
+ for(let b of shots){if(!stepShot(b,dt,W,H)){b.dead=true;continue;}for(let t of targets){if(t.dead)continue;let hit=resolveHit(b,t);if(hit){b.dead=true;if(hit==='destroy'){t.dead=true;score++;burst(t.x,t.y,colors[t.type]);hud();if(score===8){$('#message').textContent='MECA MIX 解放！ A/S/D/F を使い分けよう。';}}else{burst(b.x,b.y,'#74839a');$('#message').textContent=`${b.type}弾は${t.type}の的に無効。同じ文字を選ぼう。`;}break;}}}
+ targets=targets.filter(t=>!t.dead);shots=shots.filter(b=>!b.dead);for(let p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.ttl-=dt;}particles=particles.filter(p=>p.ttl>0);
+}
+function draw(){ctx.clearRect(0,0,W,H);ctx.fillStyle='#0b1524';ctx.fillRect(0,0,W,H);ctx.strokeStyle='#1c2f46';ctx.lineWidth=1;for(let x=0;x<W;x+=48){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}for(let y=0;y<H;y+=48){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}ctx.fillStyle='#6b809c';ctx.font='11px system-ui';ctx.fillText('RICOCHET FIELD',24,30);ctx.strokeStyle='#e3637355';ctx.setLineDash([8,8]);ctx.beginPath();ctx.moveTo(0,535);ctx.lineTo(W,535);ctx.stroke();ctx.setLineDash([]);
+ for(let t of targets){ctx.save();ctx.translate(t.x,t.y);ctx.strokeStyle=colors[t.type];ctx.fillStyle=colors[t.type]+'18';ctx.lineWidth=2;ctx.beginPath();for(let i=0;i<6;i++){let a=i*Math.PI/3+t.angle*.15;let x=Math.cos(a)*t.r,y=Math.sin(a)*t.r;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.fill();ctx.stroke();ctx.fillStyle=colors[t.type];ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='bold 25px system-ui';ctx.fillText(t.type,0,1);ctx.restore();}
+ for(let b of shots){ctx.shadowBlur=b.charged?20:9;ctx.shadowColor=colors[b.type];ctx.fillStyle=colors[b.type];ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();if(b.charged){ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();}ctx.shadowBlur=0;}
+ for(let p of particles){ctx.globalAlpha=Math.max(0,p.ttl/.55);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,3,3);}ctx.globalAlpha=1;
+ ctx.strokeStyle='#b7d3ed';ctx.beginPath();ctx.arc(aim.x,aim.y,10,0,Math.PI*2);ctx.moveTo(aim.x-16,aim.y);ctx.lineTo(aim.x+16,aim.y);ctx.moveTo(aim.x,aim.y-16);ctx.lineTo(aim.x,aim.y+16);ctx.stroke();
+ ctx.fillStyle='#253e59';ctx.beginPath();ctx.moveTo(480,545);ctx.lineTo(525,592);ctx.lineTo(435,592);ctx.closePath();ctx.fill();ctx.strokeStyle='#89adc8';ctx.stroke();
+ Object.entries(KEYS).forEach(([key,type],i)=>{let x=450+i*20;ctx.fillStyle=colors[type];ctx.fillRect(x-4,560,8,23);if(pressed.has(key)){let q=Math.min(1,(performance.now()-pressed.get(key))/CHARGE_MS);ctx.strokeStyle=colors[type];ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,562,15,-Math.PI/2,-Math.PI/2+Math.PI*2*q);ctx.stroke();}});
+ if(flash){ctx.fillStyle=`rgba(255,70,90,${flash*.7})`;ctx.fillRect(0,0,W,H);}
+}
+function frame(now){let dt=Math.min(.035,(now-last)/1000);last=now;if(state==='playing')update(dt);draw();requestAnimationFrame(frame);}hud();requestAnimationFrame(frame);
